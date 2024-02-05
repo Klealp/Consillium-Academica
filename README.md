@@ -1,2 +1,2 @@
 # Consillium-Academica
-Sistema semi automático para la obtención de estudiantes en riesgo de deserción académica 
+The Consillium Academica initiative, spearheaded by the academic vice-deanship of the Faculty of Sciences of the Universidad Nacional de Colombia, undertakes a comprehensive clustering analysis of undergraduate students.The methodology employed in this initiative serves as a proactive measure to identify and support students at risk, to improve the effectiveness of the intervention strategies of the tutor-teacher program, facilitating direct contact between mentors and identified students to provide personalized guidance and academic advisement.
