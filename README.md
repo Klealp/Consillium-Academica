@@ -3,7 +3,7 @@ The Consillium Academica initiative, spearheaded by the academic vice-deanship o
 
 The contents of the folders are described below:
 
-1. Aplication R:
+1. Application R:
    
 - You will find the two RMarkdown scripts for the execution of the Consillium Academica system, in turn, you will find the two resulting HTML files. 
 - There are 3 CSV, which are the result of the Consillium Academica system, these correspond to the result obtained with the information of the semesters from 2017-1 to 2023-1 and taking as active students those enrolled in 2023-2, 'BASE_nueva.csv' is the result of the script 'Api_Elaborar_Base.Rmd', while 'Est_Buenos.csv' and 'Est_Risgo.csv' are the result of the script 'Api_Obtener_Triage.Rmd'.
