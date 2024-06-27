@@ -1,0 +1,389 @@
+---
+title: "Consillium Academica"
+author: "Kevin Andrés Leal Pérez"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    theme: cerulean
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+#  TUTOR AUTOMÁTICO 
+
+```{r, eval = TRUE, echo=FALSE, out.width="80%", fig.pos = 'H', fig.align = 'center'}
+knitr::include_graphics("Aulas_ciencias.jpg")
+```
+
+El proyecto  tutor automático surge a partir de la iniciativa de la vicedecanatura académica de la Facultad de Ciencias de la Universidad Nacional de Colombia en querer agrupar a los estudiantes de pregrado en los programas curriculares de la facultad, a saber, Biología, Ciencias de la Computación, Estadística, Farmacia, Física, Geología, Matemáticas y Química. El objetivo de esta agrupación es, en un principio, utilizar la información de todos los estudiantes matriculados desde el primer semestre del 2012 hasta el primer semestre de 2022 y así, poder identificar un grupo de estudiantes que se caractericen por tener un desempeño académico inferior al común, cuya consecuencia puede ser la deserción académica o peor aún, la expulsión de la universidad por tener un promedio académico inferior a 3.0 en una escala de calificación de 0.0 a 5.0.
+
+A continuación encontrá el tutorial para crear la base de datos utilizada para realizar el agrupamiento, cuyas filas corresponderán a cada una de las historias académicas de los estudiantes inscritos en los programas curriculares de la Facultad de Ciencias a partir de las bases de datos que registran todas las calificaciones obtenidas en cada una de las asignaturas incritas por todos los estudiantes en cada semestre. 
+
+# Cargar las Bases de Datos 
+
+Puesto que se debe recopilar la información de las asignaturas a través de las bases de datos existentes para cada uno de los semestres, resulta útil crear la función ***Importacion***. Esta función recibirá en como una cadena de caracteres el nombre de un semestre, por ejemplo "2022-1", y de esta forma primero realizará la importación de las hojas "Historia Academica" e "Insc_Asignat" del excel con el correspondiente nombre, luego se hará la selección únicamente de los estudiantes de pregrado y por último se creará un dataframe que contendrá todas las variables de la segunda hoja y de la primera tomará la información sobre el programa al que pertenece el estudiante. Adicionalmente, se crea una colummna donde se registra el período al que corresponde cada registro.
+
+***Nota:*** Para que no se presente ningún error al ejecutar la función se debe asegurar que en todas las bases de datos los nombres de las hojas sean iguales a los mencionados anteriormente.
+```{r}
+library(readxl)
+library(sqldf)
+
+Importacion <- function(año){
+  
+  # Leer las hojas de excel con la historia académica y las asignaturas inscritas
+  Hist_Aca <- read_excel(paste0("Bases/",año,".xlsx"), sheet = "Historia Academica", col_types = c("text", 
+                                   "text", "text", "text", "skip", "text", 
+                                   "text", "text", "text", "numeric", 
+                                   "text"))
+  colnames(Hist_Aca) <- c("IDG_RIUU","FACULTAD","COD_PLAN","PLAN","CONVOCATORIA","APERTURA",
+                          "ACCESO","SUBACCESO","PBM","NODO_INICIO")
+  
+  Insc_asig <- read_excel(paste0("Bases/",año,".xlsx"), sheet = "Insc_Asignat", col_types = c("text", 
+                                   "text", "text", "text", "text", 
+                                   "text", "text", "numeric", "text", 
+                                   "numeric", "text", "text", "numeric"))
+  colnames(Insc_asig) <- c("IDG_RIUU","COD_ASIGNATURA","ASIGNATURA","GRUPO_ASIGNATURA",
+                           "GRUPO_ACT","COD_TIPOLOGIA","TIPOLOGIA","CREDITOS_ASIGNATURA",
+                           "UAB_ASIGNATURA","CALIFICACION_NUMERICA","CALIFICACION_ALFABETICA",
+                           "TIPO","VECES_VISTA")
+  
+  # Seleccionar solo pregrado 
+  Incorr <- which(Hist_Aca$SUBACCESO=="SUBACCESO") 
+  Hist_Aca <- Hist_Aca[-Incorr,]
+  
+  Posgrado <- which(Hist_Aca$SUBACCESO=="REGULAR DE POSGRADO")
+  Hist_Aca <- Hist_Aca[-Posgrado,] 
+  
+   # En las materias
+  Asignaturas <- sqldf("SELECT DISTINCT I.*, H.PLAN, H.COD_PLAN  FROM Hist_Aca H JOIN Insc_asig I 
+                                        on (H.IDG_RIUU=I.IDG_RIUU)")
+  Asignaturas$PERIODO <- rep(año,nrow(Asignaturas))
+  
+  return(Asignaturas)
+}
+```
+
+***Nota:*** Hay que tener en cuenta que al utilizar el procedimiento "SELECT DISTINCT" para hacer el cruce entre las dos bases de datos no se da lugar a que la base de datos "Asignaturas" contenga registros duplicados, considerando que en la base de Historia Académica pueden existir registros duplicados. 
+
+Así, a continuación se carga la información de todas las bases de datos y se unen en una única tabla, en el vector años se crean los textos que ingresarán a la función ***Importacion***, por lo cual si se quieren cambiar los semestres basta con cambiar los números en el código, por ejemplo si se requiriera crear la base a partir de los años de 2016 a 2021 solo debe escribirse **2016:2021**. Por defecto los años están seleccionados para solo cargar la información de los últimos 6 años, es decir, los últimos 12 semestres.
+
+```{r }
+setwd("C:/Users/kevin/Desktop/Trabajo Grado/Clustering Final")
+Años <- paste(rep(2017:2022, rep(2,6)), rep(c(1,2),6), sep = "-")
+Años <- c(Años, "2023-1")
+Cursos <- NULL 
+
+for(i in Años){
+  Asigna <- Importacion(i)
+  Cursos <- rbind(Cursos,Asigna)  
+}
+
+head(Cursos)
+```
+
+Por otro lado, también se utiliza la función para obtener el listado de los identificadores de las historias académicas activas en el semestre actual, en este caso 2023-1.
+```{r}
+# Identificar los actuales con 2023-1
+# BASE_actual <- Importacion("2023-1")
+setwd("C:/Users/kevin/Desktop/Trabajo Grado/Clustering Final")
+load("Importacion2.RData")
+BASE_actual <- Importacion2("2023-2")
+actuales <- unique(BASE_actual$IDG_RIUU)
+```
+
+
+# Funciones de Análisis Descriptivo
+
+A continuación se presentan algunas funciones que serán útiles para hacer un análisis descriptivo y exploratorio rápido sobre cualquier base de datos, estas tendrán en cuenta la cantidad de datos faltantes y realizarán un análisis distinto dependiendo de si son variables cuantitativas o cualitativas.
+
+```{r}
+# funciones descriptivas y exploratorias------------------------------------------------------
+
+missings <- function(x) return(sum(is.na(x)))
+
+summ <- function(x){
+  x2 <- na.omit(x)
+  y <- c(quantile(x2,c(0,0.25,0.5,0.75,1)),length(boxplot.stats(x2)$out),sum(is.na(x)))
+  y <- c(y[1:6],100*y[6]/length(x),y[7],100*y[7]/length(x))
+  names(y) <- c("Min","Q1","Median","Q3","Max","Outliers","(%)Outliers","Missings","(%)Missings")
+  return(round(y,digits=2))
+}
+
+summ2 <- function(x){
+  x2 <- na.omit(x)   
+  y <- c(length(unique(x2)),sum(is.na(x)))
+  y <- c(y,100*y[2]/length(x))
+  names(y) <- c("Levels","Missings","(%)Missings")
+  return(round(y,digits=2))
+}
+
+eda <- function(datos){
+  clases <- sapply(datos,class)
+  num <- clases == "numeric" | clases == "integer"
+  text <- clases == "character" | clases == "factor"
+  out_ <- list()
+  if(any(num)){
+    cat("\n***Resumen de las variables numéricas***\n\n")
+    datos1 <- as.data.frame(datos[,num])
+    colnames(datos1) <- colnames(datos)[num]
+    out_$numeric <- apply(datos1,2,summ)
+    print(out_$numeric)
+  }
+  if(any(text)){
+    cat("\n***Resumen de las variables de texto***\n\n")
+    datos2 <- as.data.frame(datos[,text])
+    colnames(datos2) <- colnames(datos)[text]
+    out_$text <- apply(datos2,2,summ2)  
+    print(out_$text)
+  }
+  missings <- apply(datos,1,function(x) return(sum(is.na(x))))
+  if(any(missings > 0)){
+    cat("\n***Número de missings por individuo***\n\n")
+    miss <- as.matrix(table(missings))
+    miss <- cbind(miss,round(100*miss/sum(miss),digits=2))
+    colnames(miss) <- c("Frequency","%")
+    out_$missings <- miss  
+    print(miss)
+  }
+  return(invisible(out_))                  
+}
+```
+
+Se observan distintas características de la base ***Cursos***, la cual contiene todas las asignaturas con sus respectivas calificaciones a lo largo de los semestres y de esta forma se puede empezar el pre-procesamiento de los datos y la limpieza de la información, al igual que el tratamiento a los datos faltantes.
+
+Para las variables numéricas se observa el valor de sus quartiles, el valor mínimo y máximo, la cantidad de datos atípicos determinados por los bigotes de un boxplot y la cantidad de registros faltantes para cada variable. En principio, resalta el hecho de que no se tiene calificación numérica para 5799 registros, lo cual corresponde al 3.63% del total de la base.
+
+Por otro lado, para las variables de texto se obtiene que hay 7584 historias académicas, alrededor de 1600 asignaturas, que para pregrado se pueden dividir en 7 tipologías distintas. Existen 3 categorías en la calificación alfabética y solo hay 20 registros vacíos. Finalmente, se tienen los 8 programas curriculares de la facultad y como era de esperar toda esta información se obtiene de 12 períodos académicos.
+
+```{r}
+eda(Cursos)
+```
+
+# Limpieza de la Base
+
+Luego de un ánalisis a los registros de asignaturas que no cuentan con una calificación numérica se descubre que la mayoría de estos corresponden precisamente a las asignaturas de intercambio académico, o asignaturas de nivelación de idiomas, estas materias no son calificadas de forma numérica, únicamente con la calificación alfabética de aprobado o reprobado. Sin embargo, varios de estos registros también corresponden a muchas asignaturas específicas de cada departamento que deberían tener una nota, pero que no la tienen puesto que pueden corresponder a registros duplicados por cambios de profesores en las asignaturas.
+
+Dado que algunas variables que se van a construir más adelante requieren de la calificación numérica y, adicionalmente, los métodos de agrupación utilizan únicamente variables cuantitativas se decide eliminar todos estos registros de la base de datos.
+
+```{r}
+NAss <- which(is.na(Cursos$CALIFICACION_NUMERICA))
+Curso_sin_NA <- Cursos[-NAss,]
+```
+
+## Análisis por Programa
+
+Una vez eliminados estos registros se procede a examinar el comportamiento de la variable de las calificaciones diferenciado por las categorías de otras variables cualitativas como, en primer lugar, el programa curricular. 
+
+Se observa que las distribuciones de las calificaciones son muy parecidas entre los programas curriculares, la única diferencia notable es que el programa de Ciencias de la Computación cuenta con un cuartil 75 más alto que los demás programas.
+
+```{r}
+library(ggplot2)
+
+ggplot(Curso_sin_NA, aes(x=COD_PLAN, y=CALIFICACION_NUMERICA, fill=COD_PLAN))+
+  geom_boxplot()+
+  stat_boxplot(geom = "errorbar", width = 0.25)+
+  scale_x_discrete(label= c("Biología", "Estadística", "Farmacia", "Física", "Geología", 
+                            "Matemáticas", "Química", "C.Computación"))+
+  xlab("PROGRAMA")+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+## Análisis por Tipología 
+
+Al observar la distribución de las calificaciones comparándolas por la tipología de la asignatura se aprecia que las 3 tipologías que tienen notas más altas son primero los trabajos de grado, luego las asignaturas electivas y por último las disciplinares optativas.
+
+```{r}
+etiquetas = c("Fud. Obligatoria", "Dis. Obligatoria", "Nivelación", "Electivas", "Fud. Optativa", "T. Grado", "Dis. Optativa")
+
+ggplot(Curso_sin_NA, aes(x=COD_TIPOLOGIA, y=CALIFICACION_NUMERICA, fill=COD_TIPOLOGIA))+
+  geom_boxplot()+
+  stat_boxplot(geom = "errorbar", width = 0.25)+
+  scale_x_discrete(label= etiquetas)+
+  xlab("TIPOLOGIA")+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+## Análisis por Período
+
+Las calificaciones a lo largo de los semestres presentaban un comportamiento muy similar, sin embargo desde el período del 2020-1S cuando inicia la modalidad virtual por la pandemia, desaparecen las notas por debajo de 3.0 por las garantías académicas creadas por la universidad, pero además, las calificaciones mejoran. En todo caso, 2022-2 es el primer semestre luego de la pandemia donde ya no están vigentes estas garantías y se aprecia que la distribución retorna a su comportamiento original.
+
+```{r}
+ggplot(Curso_sin_NA, aes(x=PERIODO, y=CALIFICACION_NUMERICA, fill=PERIODO))+
+  geom_boxplot()+
+  stat_boxplot(geom = "errorbar", width = 0.25)+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+# Construcción de la Base para el Agrupamiento
+
+Esta nueva base contendrá la información correspondiente a cada una de las historias académicas de los estudiantes de la Facultad de Ciencias, es de resaltar que existe la posibilidad de que dos historias académicas distintas pertenezcan a un mismo estudiante puesto que se encuentra inscrito en dos programas curriculares distintos. Esto ocurre cuando el estudiante realiza una doble titulación o realiza un cambio de carrera durante la ventana de tiempo considerada en esta base de datos.
+
+## PAPA y Créditos Totales
+Las primeras variables que se calculan son el PAPA del estudiante y el total de créditos que ha inscrito considerando solamente las asignaturas presentes en la base de datos de los últimos 6 años.
+
+```{r}
+Estudiantes_TOTAL <- sqldf("SELECT IDG_RIUU AS IDG_RIUU, COD_PLAN AS COD_PLAN, 
+                      SUM(CREDITOS_ASIGNATURA*CALIFICACION_NUMERICA)/SUM(CREDITOS_ASIGNATURA) AS PAPA_tot, 
+                      SUM(CREDITOS_ASIGNATURA) AS TOT_CREDITOS
+                      FROM Curso_sin_NA
+                      GROUP BY IDG_RIUU
+                      ORDER BY COD_PLAN, IDG_RIUU")
+```
+
+El comportamiento de la distribución del PAPA en los distintos programas curriculares no muestra patrones muy diferentes entre ellos. El único hecho resaltable es las diferencias en las dispersiones de los promedios, puesto que Matemáticas y Ciencias de la Computación parecen tener calificaciones más dispersas, mientras que Biología y Farmacia son más concentradas alrededor de 4.0.
+
+```{r}
+ggplot(Estudiantes_TOTAL, aes(x=COD_PLAN, y=PAPA_tot, fill=COD_PLAN))+
+  geom_boxplot()+
+  stat_boxplot(geom = "errorbar", width = 0.25)+
+  scale_x_discrete(label= c("Biología", "Estadística", "Farmacia", "Física", "Geología", "Matemáticas", "Química", "C.Computación"))+
+  xlab("PROGRAMA")+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+## Número de Matriculas
+
+Ahora, se calcula el número de matrículas en que aparece inscrito el estudiante para un determinado programa curricular. Aquí se tiene que el máximo posible será 12.
+
+```{r}
+matriculas <- sqldf("SELECT IDG_RIUU, COUNT(*) AS NO_MATRICULAS
+                    FROM (SELECT DISTINCT IDG_RIUU, PERIODO
+                          FROM Curso_sin_NA)
+                    GROUP BY IDG_RIUU")
+
+Estud_mat <- sqldf("SELECT ET.*, M.NO_MATRICULAS
+                from [Estudiantes_TOTAL] AS ET INNER JOIN [matriculas] AS M
+                      on (ET.IDG_RIUU=M.IDG_RIUU)")
+```
+
+Es de esperar que la caja de los boxplot se encuentre en los valores inferiores, puesto que se tiene un mayor número de estudiantes que han empezado sus estudios en los últimos 6 años que los que ya han culminado su carrera. Es de resaltar que Ciencias de la Computación es el programa con la mediana más pequeña puesto que es el programa curricular más nuevo de la facultad.
+
+```{r}
+ggplot(Estud_mat, aes(x=COD_PLAN, y=NO_MATRICULAS, fill=COD_PLAN))+
+  geom_boxplot()+
+  stat_boxplot(geom = "errorbar", width = 0.25)+
+  scale_x_discrete(label= c("Biología", "Estadística", "Farmacia", "Física", "Geología", "Matemáticas", "Química", "C.Computación"))+
+  xlab("PROGRAMA")+
+  theme_minimal()+
+  theme(legend.position = "none")
+
+```
+
+## Total de Créditos Aprobados
+
+A pesar de que ya se cuenta con una variable que registra la cantidad de créditos inscritos por cada estudiante, es útil crear una nueva variable pero que solo tenga en cuenta los créditos de las asignaturas que efectivamente fueron aprobadas. 
+
+```{r}
+Aprobado <- sqldf("SELECT IDG_RIUU, SUM(CREDITOS_ASIGNATURA) AS CREDITOS_AP
+                    FROM Curso_sin_NA
+                    WHERE CALIFICACION_ALFABETICA ='AP' AND CALIFICACION_NUMERICA >= 3.0
+                    GROUP BY IDG_RIUU
+                    ORDER BY IDG_RIUU")
+
+Estud_cred <- sqldf("SELECT EM.*, A.CREDITOS_AP
+                  FROM [Estud_mat] AS EM LEFT JOIN [Aprobado] AS A
+                    ON (EM.IDG_RIUU=A.IDG_RIUU)")
+
+cero <- which(is.na(Estud_cred$CREDITOS_AP))
+Estud_cred$CREDITOS_AP[cero] <- 0
+```
+
+## Avance en el Programa
+
+Esta variable registra el avance en el programa curricular de cada historia académica, sin embargo para realizar este cálculo es necesario dividir el total de créditos aprobados por el total de créditos específicos para cada programa, luego se multiplica por 100 para que el dato esté en forma de porcentaje.
+
+```{r}
+Final <- sqldf("SELECT *, CASE WHEN COD_PLAN='2513' THEN CREDITOS_AP/163
+                                WHEN COD_PLAN='2514' THEN CREDITOS_AP/141
+                                WHEN COD_PLAN='2515' THEN CREDITOS_AP/185
+                                WHEN COD_PLAN='2516' THEN CREDITOS_AP/160
+                                WHEN COD_PLAN='2517' THEN CREDITOS_AP/166
+                                WHEN COD_PLAN='2518' THEN CREDITOS_AP/140
+                                WHEN COD_PLAN='2519' THEN CREDITOS_AP/160
+                                ELSE CREDITOS_AP/139 END AS AVANCE
+                 FROM Estud_cred")
+Final$AVANCE <- round(Final$AVANCE*100,2)
+```
+
+## Avance Promedio por Semestre
+
+Esta variable es creada como un indicador que refleja la forma en que avanzan los estudiantes en sus respectivos estudios. Consiste de dividir el porcentaje de avance en la carrera por la cantidad de semestres que ha estado matriculado. Puesto que, en general, los programas están planeados para ser terminados en 10 semestres, se espera que para un estudiante con un buen desempeño académico el valor de esta variable esté alrededor del 10%. Si el valor se encuentra por debajo significa que el estudiante avanza de forma lenta, mientras que si está por encima significa que el estudiante está desarrolando sus estudios de forma rápida y terminará antes de lo esperado.
+
+```{r}
+Final$PROM_AVANCE <- round(Final$AVANCE/Final$NO_MATRICULAS,2)
+```
+
+Al observar los diagramas de caja, se aprecia que para todos los programas, los cuartiles 1, 2 y 3 se encuentran por debajo de 10, esto demuestra que al menos un 75% de los estudiantes inscritos en todos los departamentos de la Facultad de Ciencias avanzan de forma lenta en sus estudios y están tomando mucho más tiempo del planeado para culminar sus estudios.
+
+```{r}
+ggplot(Final, aes(x=COD_PLAN, y=PROM_AVANCE, fill=COD_PLAN))+
+  geom_boxplot()+
+  stat_boxplot(geom = "errorbar", width = 0.25)+
+  scale_x_discrete(label= c("Biología", "Estadística", "Farmacia", "Física", "Geología",
+                            "Matemáticas", "Química", "C.Computación"))+
+  xlab("PROGRAMA")+ ylab("AVANCE POR SEMESTRE PROMEDIO")+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+## Cantidad de Asignaturas Perdidas
+
+Esta variable registra la cantidad de asignaturas cuya calificación alfabética es reprobada para cada una de las historias académicas, al menos durante los últimos 6 años.
+
+```{r}
+perdidas <- sqldf("SELECT IDG_RIUU, COUNT(*) AS NO_PERDIDAS
+                    FROM (SELECT DISTINCT IDG_RIUU, COD_ASIGNATURA,
+                          CALIFICACION_NUMERICA
+                          FROM Curso_sin_NA
+                          WHERE CALIFICACION_ALFABETICA == 'RE' )
+                    GROUP BY IDG_RIUU ")
+
+Final <- sqldf("SELECT F.*, P.NO_PERDIDAS
+                from [Final] AS F LEFT JOIN [perdidas] AS P
+                      on (F.IDG_RIUU=P.IDG_RIUU)")
+Final[is.na(Final$NO_PERDIDAS),9] <- 0
+```
+
+Por medio de los diagramas de caja se aprecia que para todos los programas el cuartil 3 es igual o inferior a 3 asignaturas perdidas, es decir, que en general la gran mayoría de los estudiantes no suelen reprobar demasiadas asignaturas en el desarrollo de sus estudios. De todas formas, el máximo se presenta para un estudiante de Farmacia que ha reprobado hasta 17 asignaturas.  
+
+```{r}
+ggplot(Final, aes(x=COD_PLAN, y=NO_PERDIDAS, fill=COD_PLAN))+
+  geom_boxplot()+
+  stat_boxplot(geom = "errorbar", width = 0.25)+
+  scale_x_discrete(label= c("Biología", "Estadística", "Farmacia", "Física", "Geología", "Matemáticas", "Química", "C.Computación"))+
+  xlab("PROGRAMA")+
+  theme_minimal()+
+  theme(legend.position = "none")
+```
+
+# Guardar la Base Final 
+
+Finalmente, mediante el vector que almacena los identificadores de los estudiantes activos hasta el último semestre, se crea una variable binaria que tomará el valor de 1 si el estudiante se matriculó en el período actual y 0 si no aparece registrado.
+
+```{r}
+indice_actual <- NULL
+for (i in 1:length(actuales)) {
+  indice_actual <- c(indice_actual, which(Final$IDG_RIUU==actuales[i] ) ) 
+}
+
+Final$ACTIVO <- NA
+Final$ACTIVO[indice_actual] <- 1
+Final$ACTIVO[which(is.na(Final$ACTIVO))] <- 0
+```
+
+Así, se crea un CSV que almacenará toda esta información.
+
+```{r}
+write.csv(Final, "BASE_nueva.csv")
+```
+
