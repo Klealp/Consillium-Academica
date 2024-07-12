@@ -1,0 +1,490 @@
+---
+title: "Consillium Academica"
+author: "Kevin Andrés Leal Pérez"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    theme: cerulean
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+```{r, include=FALSE}
+Sys.setlocale("LC_ALL", "en_US.UTF-8") 
+Sys.setenv(LANGUAGE="en")
+```
+
+
+#  TUTOR AUTOMÁTICO 
+
+```{r, eval = TRUE, echo=FALSE, out.width="80%", fig.pos = 'H', fig.align = 'center'}
+knitr::include_graphics("Aulas_ciencias.jpg")
+```
+
+El proyecto  tutor automático surge a partir de la iniciativa de la vicedecanatura académica de la Facultad de Ciencias de la Universidad Nacional de Colombia en querer agrupar a los estudiantes de pregrado en los programas curriculares de la facultad, a saber, Biología, Ciencias de la Computación, Estadística, Farmacia, Física, Geología, Matemáticas y Química. El objetivo de esta agrupación es, en un principio, utilizar la información de todos los estudiantes matriculados desde el primer semestre del 2012 hasta el primer semestre de 2022 y así, poder identificar un grupo de estudiantes que se caractericen por tener un desempeño académico inferior al común, cuya consecuencia puede ser la deserción académica o peor aún, la expulsión de la universidad por tener un promedio académico inferior a 3.0 en una escala de calificación de 0.0 a 5.0.
+
+A continuación encontrá el tutorial de cómo llevar a cabo este análisis para que al final se obtenga una caracterización de los grupos de estudiantes en el semestre actual y un listado de los estudiantes a los que se deberá contactar. 
+
+# Cargar las bases de datos 
+
+```{r }
+# Importación datos 
+library(readr)
+BASE <- read_csv("BASE_nueva.csv", col_types = cols(...1 = col_skip(), COD_PLAN = col_character(), 
+                                                    ACTIVO = col_factor(levels = c("0", "1"))))
+
+```
+
+# Reducción de Dimensiones 
+
+Con la reducción de dimensiones se obtendrá mejores resultados para el agrupamiento, puesto que el método de análisis de componentes principales al tiempo que hace la reducción, reorganiza los datos permitiendo que los individuos similares se ubiquen juntos en la proyección.
+
+```{r}
+library("factoextra")
+library("FactoMineR")
+
+# Seleccionamos únicamente las variables cuantitativas
+Agrupar <- BASE[,c(3:9)]
+
+# ACP normado con variables fisicas
+PCAestud=PCA(Agrupar, graph = F)
+```
+
+## Determinar No. de Componentes
+
+Con los 3 primeros ejes principales se retiene aproximadamente el 95% de la varianza y por lo tanto de la información completa de la base de datos. Mediante la tabla y el histograma de valores propios se aprecia que la adición del cuarto eje no aporta más información significativa. Por lo tanto, es suficiente realizar el método de agrupamiento sobre estas 3 variables artificiales.
+
+```{r}
+# valores propios y porcentajes acumulados por cada eje
+get_eigenvalue(PCAestud) 
+# histograma de valores propios
+fviz_eig(PCAestud, addlabels=T) 
+```
+
+## Primer Plano Factorial
+
+A continuación se visualiza el primer plano factorial donde se utilizan las coordenadas en los primeros dos ejes.
+
+```{r }
+# Gráfico
+PCAestud2 <- PCAestud
+PCAestud2$var$coord <- PCAestud2$var$coord*0.65
+fviz_pca_biplot(PCAestud2, geom = "point", col.ind = "gray", col.var = "blue",labelsize= 3)
+
+# Guardamos las coordenadas de los estudiantes en los 3 ejes
+coord <- as.data.frame(PCAestud$ind$coord[,1:3])
+coord[,2] <- -coord[,2]
+```
+
+
+## Interpretaciones de los Ejes
+
+Analizando el círculo unitario, observamos que la calidad de representación de las variables es muy buena, aproximándose la mayoría a un valor de 1 (La calidad más baja es de aproximadamente 0.7 para el avance promedio por semestre). Mediante el círculo y especialmente la matriz de correlaciones se aprecia que las variables del total de créditos, número de matriculas, créditos aprobados, y el porcentaje de avance se encuentran altamente correlacionadas entre sí y con el primer eje, por lo cual este eje se interpretaría como una variable de avance en la carrera.
+
+La variable del PAPA y el número de materias perdidas están mas correlacionadas con el eje 2 y están ubicadas en un sentido opuesto, mostrando que tienen una relación inversamente proporcional entre sí. Así, el segundo eje se establecería como una variable que mide el desempeño académico del estudiante. Por último, la variable del porcentaje de avance promedio por semestre está poco relacionada con cada uno de los 3 ejes principales, acercandose a valores de 0.4.
+
+```{r}
+# Círculo unitario con el color de la calidad de representación de las variables
+fviz_pca_var(PCAestud,repel = T, col.var="cos2", gradient.cols=c("#FF0000","#FFFF00","#00FF00"))
+
+# Matriz de correlaciones de las variables con los ejes 
+library(corrplot)
+corrplot(get_pca_var(PCAestud)$cos2)
+```
+
+# Agrupamiento con Fuzzy C-Means
+
+Para lograr una mejoría en el tiempo de ejecución del algoritmo Fuzzy C-Means primero se ejecuta un K-Means, el cual proporcionará los centroides que servirán de puntos iniciales de los centros de los clusters en el Fuzzy C-Means.
+
+## Puntos de Inicialización
+
+Con el método K-Means se determinó que el número óptimo de clusters era 6, puesto que proporcionaba una partición interesante y útil para los objetivos de la iniciativa. Además con 6 grupos se encontraba el último valor de cantidad de clústers que disminuía la distancia intra-clusters y por tanto su varianza de forma significativa.
+
+```{r}
+# Establecemos una semilla para garantizar reproducibilidad
+set.seed(21)
+
+# Ejecutamos el K-Means con 6 grupos
+k_means <- kmeans(coord, 6, nstart = 40) 
+
+# Gráfico del resultado sobre el primer plano factorial
+library(ggplot2)
+Cl_kmeans <-  as.factor(k_means$cluster)
+ggplot() + geom_point(aes(x = Dim.1, y = Dim.2, color = Cl_kmeans), data = coord, size = 2) +
+  scale_colour_manual(values=rainbow(6)) +
+  geom_point(aes(x = k_means$centers[, 1], y = k_means$centers[, 2]), color = 'black', size = 3) + 
+  ggtitle('Agrupamiento de Datos con k = 6 / K-Medios') + 
+  xlab('Avance en la carrera') + ylab('Desempeño Académico') +
+  labs(color="Cluster")+
+  theme_minimal()
+
+```
+
+## Ejecución del Algoritmo
+
+Ahora, implementamos el método Fuzzy C-Means y con las funciones *tic()* y *toc()* podremos saber la cantidad de tiempo en segundos que le tomó al algoritmo completarse, este tiempo debe ubicarse entre 1 y 2 minutos considerando el tamaño de la base obtenida con la información de únicamente los últimos 6 años.
+
+```{r}
+library(ppclust)
+
+tictoc::tic()
+ini.fcm <- fcm(coord, centers = k_means$centers, numseed = 21, m=2)
+tictoc::toc()
+```
+
+A continuación se presenta el resultado del clustering, que a simple vista es muy parecido al obtenido con K-Means. Sin embargo, ahora se cuenta con una matriz de probabilidades de pertenencia de cada registro a cada uno de los grupos.
+
+```{r}
+Cluster <- as.factor(ini.fcm$cluster)
+ggplot() + geom_point(aes(x = Dim.1, y = Dim.2, color = Cluster), data = coord, size = 2) +
+  scale_colour_manual(values=rainbow(6)) +
+  ggtitle('Agrupamiento de Datos con k = 6 / Fuzzy ') + 
+  xlab('Avance en la carrera') + ylab('Desempeño Académico') +
+  labs(color="Cluster")+
+  theme_minimal()
+```
+
+## Interpretación de los grupos
+
+Como beneficio de usar la metodología Fuzzy, podemos cambiar el umbral de pertenencia a cada uno de los grupos, por lo tanto para realizar la caracterización de los grupos se tomará como referencia únicamente a los individuos que tengan una probabilidad de pertenencia a cada grupo igual o mayor a 0.5. El porcentaje de historias académicas que no se están utilizando para la caracterización de los grupos es del 25.6%.
+
+```{r}
+# Almacenamos la matriz de probabilidades de pertenencia
+Fuzzy_matrix <- ini.fcm$u
+# Creamos el vector de asignación de grupos tomando como límite 0.5
+clust_tv <- crisp(Fuzzy_matrix, method = "threshold", tv=0.5)
+# Calculamos la cantidad de individuos sin clasificar, cuya etiqueta será 0
+sum(clust_tv==0)/nrow(BASE)*100
+```
+El gráfico de visualización del agrupamiento se muestra a continuación, aquí se aprecia que finalmente los individuos utilizados para la interpretación de los clusters son los más cercanos a sus respectivos centroides.
+
+```{r}
+colores <- c("#6C7B8B", rainbow(6))
+ggplot() + geom_point(aes(x = Dim.1, y = Dim.2, color = as.factor(clust_tv)), data = coord, size = 2) +
+  scale_colour_manual(values = colores) +
+  ggtitle('Clusters de Datos con umbral = 0.5') + 
+  xlab('Avance en la carrera') + ylab('Desempeño Académico') +
+  labs(color="Cluster")+
+  theme_minimal()
+```
+
+### Función para caracterización de los grupos
+
+Para observar el comportamiento de los grupos se utilazará la siguiente función de análisis de clusters, que creará gráficos pertinentes para el análisis como se mostrará a continuación.
+
+```{r}
+analisis_clusters <- function(datos, cluster, ruido=F) {
+  # Preparación de la base para facilidad en los códigos de los gráficos
+  datos$cluster <- as.factor(cluster)
+  datos$COD_PLAN <- factor(datos$COD_PLAN, labels = c("Bio", "Est", "Far", "Fís", "Geo", "Mat", "Quí", "Comp") )
+  PAPAS    <- list()
+  PERDIDA  <- list()
+  PROM_AV  <- list()
+  CREDITOS <- list()
+  Frecuencias <- rep(NA,max(cluster))
+  
+  # División de variables cuantitativas y cualitativas
+  clases <- sapply(datos,class)
+  num <- clases == "numeric" | clases == "integer"
+  text <- clases == "character" | clases == "factor"
+  
+  LIMITES  <- array(0, dim = c(3, sum(num), max(cluster) ) )
+  dimnames(LIMITES) <- list(c("Q_05", "Q_50", "Q_90"), colnames(datos[,num]), 1:max(cluster))
+  
+  # Creación del vector de colores, el cual cambiará si el primer grupo tiene etiqueta 0 y corresponde a individuos sin clasificar
+  if (ruido == T){
+    colores <- c("#6C7B8B", rainbow(max(cluster)))
+  }else{
+    colores <- rainbow(max(cluster))
+  }
+  
+  # Ciclo de creación de los boxplot del PAPA y materias perdidas para cada cluster
+  for (i in 1:max(cluster)) {
+    Tabla <- datos[datos$cluster==i,]
+    Frecuencias[i] <- nrow(Tabla)
+    LIMITES[,,i] <- apply(Tabla[,num], 2, function(X) quantile(X, c(0.05, 0.5, 0.95)))
+    
+    PAPAS[[i]] <- ggplot(Tabla, aes(x=COD_PLAN, y=PAPA_tot, fill= COD_PLAN ))+
+      geom_boxplot()+
+      stat_boxplot(geom = "errorbar", width = 0.25)+
+      xlab("PROGRAMA")+ ylab("PAPA")+
+      ylim(0,5)+
+      ggtitle(paste0("Cluster ",i))+
+      theme_minimal()+
+      theme(legend.position = "none")
+    
+    PERDIDA[[i]] <- ggplot(Tabla, aes(x=COD_PLAN, y=NO_PERDIDAS, fill= COD_PLAN ))+
+      geom_boxplot()+
+      stat_boxplot(geom = "errorbar", width = 0.25)+
+      xlab("PROGRAMA")+ ylab(" No. Perdidas")+
+      ylim(0,max(datos$NO_PERDIDAS))+
+      ggtitle(paste0("Cluster ",i))+
+      theme_minimal()+
+      theme(legend.position = "none") 
+    
+    PROM_AV[[i]] <- ggplot(Tabla, aes(x=COD_PLAN, y=PROM_AVANCE, fill= COD_PLAN ))+
+      geom_boxplot()+
+      stat_boxplot(geom = "errorbar", width = 0.25)+
+      xlab("PROGRAMA")+ ylab("Avance Semestre Promedio")+
+      ylim(0,max(datos$PROM_AVANCE))+
+      ggtitle(paste0("Cluster ",i))+
+      theme_minimal()+
+      theme(legend.position = "none") 
+    
+    CREDITOS[[i]] <- ggplot(Tabla, aes(x=COD_PLAN, y=CREDITOS_AP, fill= COD_PLAN ))+
+      geom_boxplot()+
+      stat_boxplot(geom = "errorbar", width = 0.25)+
+      xlab("PROGRAMA")+ ylab("Créditos Aprobados")+
+      ylim(0,max(datos$CREDITOS_AP))+
+      ggtitle(paste0("Cluster ",i))+
+      theme_minimal()+
+      theme(legend.position = "none") 
+  }
+  
+  # Gráficos para comparar el comportamiento general de los clusters en distintas variables
+  Avance <- ggplot(datos, aes(y=AVANCE, x=NO_MATRICULAS, color=cluster) )+
+    geom_point()+
+    scale_colour_manual(values=colores) +
+    ggtitle("Diagrama de Dispersión del Avance de Carrera")+
+    labs(color="Cluster")+
+    theme_minimal()
+  
+  PAPA_GEN <- ggplot(datos, aes(x=cluster, y=PAPA_tot, fill= cluster ))+
+    geom_boxplot()+
+    scale_fill_manual(values =colores)+
+    stat_boxplot(geom = "errorbar", width = 0.25)+
+    xlab("GRUPO")+ ylab("PAPA")+
+    theme_minimal()+
+    theme(legend.position = "none")
+  
+  PERD_GEN <- ggplot(datos, aes(x=cluster, y=NO_PERDIDAS, fill= cluster ))+
+    geom_boxplot()+
+    scale_fill_manual(values =colores)+
+    stat_boxplot(geom = "errorbar", width = 0.25)+
+    xlab("GRUPO")+ ylab("No. Perdidas")+
+    theme_minimal()+
+    theme(legend.position = "none")
+  
+  return(list(PAPAS=PAPAS, PAPA_GEN=PAPA_GEN, Avance=Avance, PERDIDA=PERDIDA, 
+              PERD_GEN=PERD_GEN, PROM_AV=PROM_AV, CREDITOS=CREDITOS,
+              LIMITES=LIMITES, FREC=Frecuencias) )
+}
+
+```
+
+Esta función recibe como primer parámetro la base de datos que almacena la información de todas las variables académicas, el segundo parámetro es el vector que contiene el grupo al que pertenece cada registro y por último, el parámetro ***ruido*** para indicar si hay un conjunto de datos que no se encuentra clasificado para que de esta manera sean representados con un color diferente o no se incluyan dentro de algunos de los gráficos.
+
+```{r}
+Int.total <- analisis_clusters(BASE, clust_tv, ruido = T)
+# Podemos ver la cantidad de individuos dentro de cada grupo
+Int.total$FREC
+```
+
+Para un análisis superficial se puede visualizar un diagrama de dispersión entre las variables del número de matrículas y el porcentaje de avance de los estudiantes, donde el color del punto indica el cluster al que pertenecen, adicionalmente se grafica un diagrama de caja para ver la distribución del PAPA y la cantidad de asignaturas reprobadas en cada cluster.
+
+```{r out.width=800}
+# Grilla ggplot
+library(gridExtra)
+# Gráficos generales
+Int.total$Avance
+grid.arrange(Int.total$PAPA_GEN, Int.total$PERD_GEN, ncol=2)
+```
+
+También se puede ver un comportamiento más detallado de las variables mediante un diagrama de caja dentro de cada cluster para cada programa curricular graficando las variables de PAPA y la cantidad de asignaturas reprobadas.
+
+```{r out.width=800}
+grid.arrange( Int.total$PAPAS[[1]],Int.total$PAPAS[[2]],Int.total$PAPAS[[3]],
+              Int.total$PAPAS[[4]],Int.total$PAPAS[[5]],Int.total$PAPAS[[6]], ncol=3)
+
+grid.arrange( Int.total$PERDIDA[[1]],Int.total$PERDIDA[[2]],Int.total$PERDIDA[[3]],
+              Int.total$PERDIDA[[4]],Int.total$PERDIDA[[5]],Int.total$PERDIDA[[6]], ncol=3) 
+```
+
+```{r out.width=800}
+grid.arrange( Int.total$PROM_AV[[1]],Int.total$PROM_AV[[2]],Int.total$PROM_AV[[3]],
+              Int.total$PROM_AV[[4]],Int.total$PROM_AV[[5]],Int.total$PROM_AV[[6]], ncol=3) 
+
+grid.arrange( Int.total$CREDITOS[[1]],Int.total$CREDITOS[[2]],Int.total$CREDITOS[[3]],
+              Int.total$CREDITOS[[4]],Int.total$CREDITOS[[5]],Int.total$CREDITOS[[6]], ncol=3) 
+```
+
+Una ventaja de considerar únicamente a los estudiantes que tienen una alta probabilidad de pertenencia a sus respectivos clusters, es que al comparar los boxplot que se producen con el total de los estudiantes con los presentados anteriormente se reduce considerablemente los datos atípicos que se ilustran en lo diagramas de caja de cada programa curricular para todas las variables. 
+
+Gracias al análisis presentado hasta el momento, se aprecian importantes diferencias entre los grupos resultantes lo que permite establecer una jerarquía para la priorización en la atención que requieren los estudiantes de la facultad, emulando lo que se conoce como un triage en el servicio de urgencias hospitalarias, que en este caso definimos como ***Triage Académico***.
+
+# Triage Académico
+
+## Triage 1: Riesgo Alto
+
+Este grupo es el más diferente de los demás pues representa a todas las personas que pierden su calidad de estudiantes en la universidad por su pésimo desempeño académico ya que su PAPA se mueve entre 0.0 y 2.6 en general, o en algunos casos hasta 3.0 explicando que hayan estudiantes que logran continuar hasta la tercera matrícula. Así, el avance es de 0 o solo hasta un 8% de la carrera y todo esto se refleja, además, en una alta cantidad de materias perdidas en apenas pocos semestres.
+
+```{r}
+knitr::kable(Int.total$LIMITES[,,5], digits = 1, align = "c")
+```
+
+
+## Triage 2: Riesgo Medio
+
+Este grupo es el siguiente en la lista de atención, puesto que son estudiantes recién ingresados que tienen una distribución en las calificaciones baja pues el PAPA se mueve entre 2.8 y hasta 4.0, con una mediana de 3.4. En este grupo el avance promedio también se mantiene en porcentajes bajos (mediana de 4.6% de avance por semestre), sin embargo al llevar pocas matriculas registran pocas materias perdidas.
+
+```{r}
+knitr::kable(Int.total$LIMITES[,,2], digits = 1, align = "c")
+```
+
+
+## Triage 3: Riesgo Bajo  
+
+Este grupo se caracteriza por tener un desempeño académico regular al tener calificaciones del PAPA entre 3.3 y 3.9. Estos estudiantes reportan un número alto de matrículas, pero sus porcentajes de avance en sus respectivos programas son más bajos de lo que se espera, se aprecia un contraste entre los valores de los cuantiles inferiores y superiores en las variables de No. de matrículas y el avance en la carrera (7 y 11 vs. 42.6% y 78.7%, respectivamente), lo cual puede explicarse al observar que su avance en el programa a través de los años es lento, puesto que la mediana en el avance promedio por semestre es de 6.5%, Además, son estudiantes que durante el desarrollo de sus estudios pierden varias materias (mediana de 5), lo cual explica las amplias diferencias entre los valores de los cuantiles para la cantidad de créditos totales inscritos y los valores en los créditos aprobados.
+
+```{r}
+knitr::kable(Int.total$LIMITES[,,4], digits = 1, align = "c")
+```
+
+## Triage 4: Consillium Bajo
+
+Este grupo corresponde a personas que hasta ahora están empezando sus estudios universitarios como en el Triage 2, puesto que también se encuentran entre primera y cuarta matrícula, sin embargo son la contrapartida del Triage 2 porque con este número de matrículas completan entre un 7.4% y un 30% de avance en la carrera y su avance promedio por semestre es entre 5.9% y 11.4% y en este grupo los rangos del total de créditos coincide con los créditos aprobados, nuevamente reflejando que este grupo de estudiantes no reprueban materias. Finalmente, tiene un mejor rendimiento académico, pues la mayoría tienen calificaciones del PAPA entre 3.6 y 4.8.
+
+```{r}
+knitr::kable(Int.total$LIMITES[,,3], digits = 1, align = "c")
+```
+
+## Triage 5: Consillium Medio
+
+Grupo característico de personas de avance medio en la carrera, se encuentran entre la cuarta y octava matrícula con avances entre el 38% y el 63.8%, y no tienden a perder materias, ya que por mucho pierden 2, su PAPA se mueve entre 3.7 y 4.5. Por lo tanto, este grupo representa a estudiantes que han desarrollado sus estudios de forma óptima.
+
+```{r}
+knitr::kable(Int.total$LIMITES[,,1], digits = 1, align = "c")
+```
+
+## Triage 6: Consillium Alto
+
+Este grupo es el contrapartida del Triage 3, también corresponde a las personas de mayor avance, puesto que han avanzado entre un 70% y un 102.8% en su programa, pero en la misma cantidad de semestres (8-11), por otro lado los valores máximos y minimos del total de créditos y créditos aprobados son similares lo que da señal de que no hay pérdida de créditos pues la mayoría no han perdido materias o solo hasta máximo 3. Finalmente su PAPA se encuentra entre 3.8 y 4.5. La mediana del avance promedio es 9, señalando que si cumplen las expectativas en la cantidad de semestres cursados para culminar sus estudios y convertirse en profesionales.
+
+```{r}
+knitr::kable(Int.total$LIMITES[,,6], digits = 1, align = "c")
+```
+
+
+
+
+
+# Identificación de Estudiantes en Riesgo
+
+Finalmente los grupos que requieren de atención de su profesor tutor con mayor urgencia son los Triages 1 y 2 donde el primero corresponde a los estudiantes que son expulsados del programa por su mal desempeño académico y el segundo correspondiente a los estudiantes que apenas empiezan su recorrido por la universidad y que tienen un PAPA apenas superior del límite de pérdida del cupo en el programa. Sin embargo, acá también encontramos estudiantes con un desempeño académico aceptable, por lo cual sería necesario establecer un límite en la nota del PAPA para escoger los que de verdad requieren esta asistencia.
+
+Puesto que deseamos tener el alcance de ayudar a todos los estudiantes que lo requieran, pueden existir casos en los que un estudiante se ubique en el lado opuesto de la frontera de estos grupos y se clasifique dentro de los grupos a los que no se les dará atención, así que podemos mover el umbral a un nivel más bajo para que se amplie el rango de cobertura de estos dos grupos como se muestra a continuación
+
+
+```{r}
+# Ampliación de la cobertura de los Triage 1 y 2
+Clust_aum <- ini.fcm$cluster
+Clust_aum[which(Fuzzy_matrix[,2]>0.2)] <- 2 # Triage 2
+Clust_aum[which(Fuzzy_matrix[,5]>0.2)] <- 5 # Triage 1
+```
+
+A continuación se observa nuevamente la asignación de los grupos para todos los estudiantes considerando la ampliación en la cobertura de los Triage de mayor riesgo.
+
+```{r}
+ggplot() + geom_point(aes(x = Dim.1, y = Dim.2, color = as.factor(Clust_aum)), data = coord, size = 2) +
+  scale_colour_manual(values=rainbow(6)) +
+  ggtitle('Clusters de Datos con umbral = 0.2') + 
+  xlab('Avance en la carrera') + ylab('Desempeño Académico') +
+  labs(color="Cluster")
+```
+
+De esta forma creamos el listado de estudiantes que requieren la atención por parte de sus profesores tutores
+
+```{r}
+BASE$GRUPO <- Clust_aum
+activos <- which(BASE$ACTIVO=="1" & BASE$PAPA_tot>2.7)
+BASE_act <- BASE[activos,]
+```
+
+Cargamos la información personal de los estudiantes
+
+```{r}
+library(sqldf)
+load("Importacion2.RData")
+INFO_actuales <- Importacion2("2023-2")
+INFO_actuales <- unique(INFO_actuales)
+
+BASE_act <- sqldf("SELECT B.*, F.PLAN
+                   FROM BASE_act B INNER JOIN INFO_actuales F 
+                        ON (B.IDG_RIUU = F.IDG_RIUU)")
+```
+
+
+### Triage 1
+```{r}
+Riesgo_Extremo <- BASE_act[which(BASE_act$GRUPO==5),c(1:3,11:12)]
+Riesgo_Extremo$TRIAGE <- rep("I", nrow(Riesgo_Extremo))
+nrow(Riesgo_Extremo)
+head(Riesgo_Extremo)
+```
+
+### Triage 2
+```{r}
+Riesgo_Medio <- BASE_act[which(BASE_act$PAPA_tot<3.4 & BASE_act$GRUPO==2 ), c(1:3,11:12)]
+Riesgo_Medio$TRIAGE <- rep("II", nrow(Riesgo_Medio))
+nrow(Riesgo_Medio)
+head(Riesgo_Medio)
+```
+
+### Triage 3
+```{r}
+Riesgo_Bajo <- BASE_act[which(BASE_act$PAPA_tot<3.4 & BASE_act$AVANCE<75 & BASE_act$GRUPO==4 ),c(1:3,11:12)]
+Riesgo_Bajo$TRIAGE <- rep("III", nrow(Riesgo_Bajo))
+nrow(Riesgo_Bajo)
+head(Riesgo_Bajo)
+```
+
+De esta forma, se crea un dataframe que contiene el listado de los estudiantes activos en el semestre con su respectivo nivel de triage académico y esta información se guardará en un archivo 'csv'.
+```{r}
+Est_Riesgo <- rbind(Riesgo_Extremo, Riesgo_Medio, Riesgo_Bajo)
+Est_Riesgo$PAPA_tot <- as.character(round(Est_Riesgo$PAPA_tot, 1))
+head(Est_Riesgo)
+write.csv(Est_Riesgo, file = "Est_Riesgo.csv", fileEncoding = "UTF-8")
+```
+
+# Identificación de estudiantes sobresalientes
+
+Para aprovechar el resultado del Triage Academico con respecto a los triage IV, V y VI, se decide enviar un correo de felicitaciones a los estudiantes clasificados dentro de estos niveles, con el fin de motivarlos a continuar con ese buen desempeño y que consigan culminar sus estudios.
+
+### Triage 4
+```{r}
+Consillium_Bajo <- BASE_act[which(BASE_act$GRUPO==3 & BASE_act$PAPA_tot>3.7),c(1:3,11:12)]
+Consillium_Bajo$TRIAGE <- rep("IV", nrow(Consillium_Bajo))
+nrow(Consillium_Bajo)
+head(Consillium_Bajo)
+```
+
+### Triage 5
+```{r}
+Consillium_Medio <- BASE_act[which(BASE_act$GRUPO==1 & BASE_act$PAPA_tot>3.7),c(1:3,11:12)]
+Consillium_Medio$TRIAGE <- rep("V", nrow(Consillium_Medio))
+nrow(Consillium_Medio)
+head(Consillium_Medio)
+```
+
+
+### Triage 6
+```{r}
+Consillium_Alto <- BASE_act[which(BASE_act$GRUPO==6 & BASE_act$PAPA_tot>3.7),c(1:3,11:12)]
+Consillium_Alto$TRIAGE <- rep("VI", nrow(Consillium_Alto))
+nrow(Consillium_Alto)
+head(Consillium_Alto)
+```
+
+De esta forma, se crea un dataframe que contiene el listado de los estudiantes activos en el semestre con su respectivo nivel de triage académico y esta información se guardará en un archivo 'csv'.
+
+```{r}
+Est_Buenos <- rbind(Consillium_Bajo, Consillium_Medio, Consillium_Alto)
+Est_Buenos$PAPA_tot <- as.character(round(Est_Buenos$PAPA_tot, 1))
+head(Est_Buenos)
+write.csv(Est_Buenos, file = "Est_Buenos.csv", fileEncoding = "UTF-8")
+```
